@@ -4,6 +4,10 @@
   shell: kubeadm reset -f
   register: kubeadm_reset
 
+- name: Cleanup IPTables
+  shell: iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
+  register: kubeadm_reset
+
 - name: Join Kubernetes Cluster
   shell: kubeadm join --ignore-preflight-errors=all --token {{ token }} {{ groups['master'][0] }}:6443 --discovery-token-unsafe-skip-ca-verification
   when: kubeadm_reset is succeeded

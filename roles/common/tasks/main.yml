@@ -19,17 +19,32 @@
     name: UTC
   register: timezone
 
-- name: gpu mem check
-  shell: cat /boot/config.txt | grep gpu_mem
-  changed_when: false
-  register: gpu_mem_check
+- name: Disallow password authentication
+  lineinfile: dest=/etc/ssh/sshd_config
+    regexp="^PasswordAuthentication"
+    line="PasswordAuthentication no"
+    state=present
+  notify: Restart ssh
 
-- name: reduce gpu memory
+- name: Disallow root SSH access
+  lineinfile: dest=/etc/ssh/sshd_config
+    regexp="^PermitRootLogin"
+    line="PermitRootLogin no"
+    state=present
+  notify: Restart ssh
+
+- name: set correct locale
+  locale_gen:
+    name: en_US.UTF-8
+    state: present
+
+- name: "adjust /boot/config.txt based on boot_config_lines"
   lineinfile:
-    path: /boot/config.txt
-    line: gpu_mem=16
-  register: gpu_mem
-  when: gpu_mem_check.stdout == ""
+    line: '{{ item }}'
+    dest: /boot/config.txt
+    regexp: "^{{ item }}"
+  with_items: '{{ boot_config_lines }}'
+  register: boot_config_lines
 
 - name: Enabling cgroup options at boot
   copy:
@@ -42,10 +57,19 @@
   tags:
     - boot
 
-- name: python-apt dependency
-  shell: apt-get install -y python-apt
-  args:
-    warn: no
+- name: Add the inventory into /etc/hosts
+  lineinfile:
+    dest: /etc/hosts
+    regexp: '.*{{ item }}$'
+    line: "{{ hostvars[item]['ansible_host'] }} {{item}}"
+    state: present
+  when: hostvars[item]['ansible_host'] is defined
+  with_items:
+    - "{{ groups['all'] }}"
+
+- name: Disable Swap
+  shell: dphys-swapfile swapoff && dphys-swapfile uninstall && update-rc.d dphys-swapfile remove
+  ignore_errors: True
 
 - name: apt-get update
   apt:
@@ -54,18 +78,76 @@
     autoremove: yes
     cache_valid_time: 86400
 
+- name: python-apt dependency
+  shell: apt-get install -y python-apt
+  args:
+    warn: no
+
 - name: apt-get upgrade
   apt:
     upgrade: full
 
-#- name: Reboot (as needed)
-#  reboot:
-#    reboot_timeout: 3600
-#  when: cmdline or timezone or hostname or gpu_mem is changed
-#  tags:
-#    - boot
-#    - shutdown
-- name: Reboot Message
-  debug:
-    msg: "A reboot is required but the reboot module is a little wonky. Hopefully someone fixes this soon."
-  when: cmdline or timezone or hostname or gpu_mem is changed
+- name: Determine if docker is installed
+  stat:
+    path: /usr/bin/docker
+  register: docker_there
+  ignore_errors: True
+
+- name: Install Docker Pre-Reqs
+  apt:
+    name: "{{ packages }}"
+  vars:
+    packages:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - gnupg2
+    - software-properties-common
+  when: docker_there.stat.exists == False
+
+- name: Import Docker Repo Key
+  apt_key:
+    url: https://download.docker.com/linux/debian/gpg
+    state: present
+  when: docker_there.stat.exists == False
+
+- name: Add and enable Docker Repository
+  apt_repository:
+    repo: deb [arch=armhf] https://download.docker.com/linux/raspbian stretch stable
+    state: present
+    filename: docker-ce
+  when: docker_there.stat.exists == False
+
+- name: apt-get update
+  apt:
+    update_cache: yes
+    autoclean: yes
+    autoremove: yes
+    cache_valid_time: 86400
+  when: docker_there.stat.exists == False
+
+- name: Install Docker
+  apt:
+    name: "{{ packages }}"
+  vars:
+    packages:
+    - docker-ce={{ docker_ce_version }}
+    - containerd.io
+  when: docker_there.stat.exists == False
+  register: docker_installed
+
+- name: Lock docker version to {{ docker_ce_version}}
+  command: /usr/bin/apt-mark hold docker-ce
+  when: docker_installed.changed
+
+- name: restart machine
+  shell: sleep 2 && shutdown -r now
+  async: 1
+  poll: 0
+  ignore_errors: true
+  when: cmdline.changed or timezone.changed or hostname.changed or boot_config_lines.changed
+
+- name: waiting for machine to come back
+  local_action: wait_for port=22 host="{{ ansible_host|default(inventory_hostname) }}" delay=20 timeout=120
+  become: false
+  when: cmdline.changed or timezone.changed or hostname.changed or boot_config_lines.changed

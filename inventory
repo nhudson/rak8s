@@ -1,13 +1,17 @@
-[dev]
-rak8s000    ansible_host=192.168.86.200
-rak8s001    ansible_host=192.168.86.201
-rak8s002    ansible_host=192.168.86.202
-
-[prod]
-rak8s003    ansible_host=192.168.86.203
-rak8s004    ansible_host=192.168.86.204
-rak8s005    ansible_host=192.168.86.205
+[all]
+pik8s01 ansible_host=192.168.6.50 # B8:27:EB:DA:BA:7E
+pik8s02 ansible_host=192.168.6.51 # B8:27:EB:84:66:3B
+pik8s03 ansible_host=192.168.6.52 # B8:27:EB:40:60:9B
+pik8s04 ansible_host=192.168.6.53 # B8:27:EB:D1:94:F1
+pik8s05 ansible_host=192.168.6.54 # B8:27:EB:5B:C3:B9
+pik8s06 ansible_host=192.168.6.55 # B8:27:EB:09:9F:EA
 
 [master]
-rak8s000
-rak8s003
+pik8s01
+
+[nodes]
+pik8s02
+pik8s03
+pik8s04
+pik8s05
+pik8s06
